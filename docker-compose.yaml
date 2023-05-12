@@ -1,0 +1,77 @@
+networks:
+  jenkins:
+
+volumes:
+  jenkins-data:
+  jenkins-jnlp-agent-data:
+  dind-socket:
+  dind-storage:
+
+services:
+  master:
+    image: jenkins/jenkins:lts
+    user: root
+    restart: always
+    networks:
+      - jenkins
+    ports:
+      - 8080:8080
+    environment:
+      - JAVA_OPTS=-Xmx2048m
+    privileged: true
+    volumes:
+      - jenkins-data:/var/jenkins_home
+      - jenkins-data:/home
+      - ./jenkins.yaml:/var/jenkins_home/jenkins_caac.yaml
+      - dind-socket:/dind/run
+      - dind-storage:/var/lib/docker
+
+  docker-in-docker:
+    image: docker:20.10-dind
+    networks:
+      - jenkins
+    environment:
+      - DOCKER_TLS_CERTDIR=
+    privileged: true
+    volumes:
+      - dind-socket:/var/run
+      - dind-storage:/var/lib/docker
+    expose:
+      - 2375
+
+  backup:
+    image: alpine:3.14
+    profiles:
+      - backup
+    entrypoint: /bin/sh
+    command:
+      - -xc
+      - tar -czvf /backups/backup.tgz -C /var/jenkins_home .
+    volumes:
+      - jenkins-data:/var/jenkins_home
+      - ./backups:/backups
+
+  restore:
+    image: alpine:3.14
+    entrypoint: /bin/sh
+    profiles:
+      - restore
+    command:
+      - -xc
+      - tar -C /var/jenkins_home -xzvf /backups/backup.tgz
+    volumes:
+      - jenkins-data:/var/jenkins_home
+      - ./backups:/backups
+
+  jnlp-agent:
+    image: jenkins/jnlp-agent-docker
+    command:  ${JNLP_KEY} jnlp-agent -url http://master:8080/
+    networks:
+      - jenkins
+    privileged: true
+    user: root
+    volumes:
+      - jenkins-jnlp-agent-data:/var/jenkins_home/worker
+      - /var/run/docker.sock:/var/run/docker.sock
+      - /var/lib/docker:/var/lib/docker
+
